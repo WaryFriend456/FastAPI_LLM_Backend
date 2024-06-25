@@ -5,8 +5,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
+# from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores.utils import DistanceStrategy
+from langchain_huggingface import HuggingFaceEmbeddings
 import faiss
 import pickle
 from langchain_community.docstore.in_memory import InMemoryDocstore
@@ -18,8 +19,9 @@ import uuid
 from pymongo import MongoClient
 
 
-torch.random.manual_seed(0)
+force_download = True
 
+torch.random.manual_seed(0)
 app = FastAPI()
 
 KNOWLEDGE_VECTOR_DATABASE = None
@@ -208,14 +210,39 @@ def generate_answer(context, question):
     return output[0]['generated_text']
 
 
+# @app.post("/start_session")
+# async def start_session():
+#     session_id = str(uuid.uuid4())
+#     # Create a new session document
+#     chats_collection.insert_one({
+#         "session_id": session_id,
+#         "messages": [],
+#         "created_at": datetime.datetime.now()
+#     })
+#     return {"session_id": session_id}
+
+
+def delete_empty_sessions():
+    try:
+        result = chats_collection.delete_many({"messages": []})
+        return result.deleted_count
+    except Exception as e:
+        print(f"Failed to delete empty sessions: {str(e)}")
+        return 0
+
+
 @app.post("/start_session")
 async def start_session():
+    # Delete empty sessions before starting a new session
+    deleted_count = delete_empty_sessions()
+    print(f"Deleted {deleted_count} empty sessions before starting a new session")
+
     session_id = str(uuid.uuid4())
     # Create a new session document
     chats_collection.insert_one({
         "session_id": session_id,
         "messages": [],
-        "created_at": datetime.datetime.utcnow()
+        "created_at": datetime.datetime.now()
     })
     return {"session_id": session_id}
 
@@ -253,7 +280,7 @@ async def receive_query(request: Request):
         "user": query,
         "context": context,
         "chatbot": answer,
-        "timestamp": datetime.datetime.utcnow()
+        "timestamp": datetime.datetime.now()
     }
 
     chats_collection.update_one(

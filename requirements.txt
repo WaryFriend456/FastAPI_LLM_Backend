@@ -1,0 +1,10 @@
+uvicorn
+torch
+fastapi
+transformers
+pymongo
+accelerate
+langchain-community
+faiss-cpu
+torch
+sentence-transformers
