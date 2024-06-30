@@ -5,7 +5,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
 from langchain_community.vectorstores import FAISS
-# from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores.utils import DistanceStrategy
 from langchain_huggingface import HuggingFaceEmbeddings
 import faiss
@@ -31,6 +30,8 @@ generation_args = None
 mongo_client = None
 db = None
 chats_collection = None
+RAG_PROMPT_TEMPLATE1 = None
+RAG_PROMPT_TEMPLATE2 = None
 
 
 @asynccontextmanager
@@ -58,7 +59,7 @@ app.add_middleware(
 
 
 def init():
-    global KNOWLEDGE_VECTOR_DATABASE, RAG_PROMPT_TEMPLATE, pipe, generation_args, mongo_client, db, chats_collection
+    global KNOWLEDGE_VECTOR_DATABASE, RAG_PROMPT_TEMPLATE, pipe, generation_args, mongo_client, db, chats_collection, RAG_PROMPT_TEMPLATE1, RAG_PROMPT_TEMPLATE2
 
     mongo_client = MongoClient("mongodb://localhost:27017/")
     db = mongo_client["chat_db"]
@@ -112,64 +113,63 @@ def init():
     # prompt_chat = [
     #     {
     #         "role": "system",
-    #         "content": """Using the information contained in the context,
-    # Give a comprehensive answer to the question.
-    # Respond only to the question asked , response should be concise and relevant to the question.
-    # provide the number of the source document when relevant.
-    # If the answer cannot be deduced from the context, do not give an answer""",
+    #         "content": """Your are an helpful AI assistant, Using the information contained in the context,
+    #         greet the user and Give a comprehensive answer to the Question.
+    #         Respond only to the Question asked, response should be concise and relevant to the question.""",
     #     },
     #     {
     #         "role": "user",
     #         "content": """Context:
-    # {context}
-    # ---
-    # Now here is the Question you need to answer.
-    # Question:{question}
-    #         """,
+    #     {context}
+    #     ---
+    #     Now here is the Question you need to answer.
+    #     Question:{question}
+    #             """,
     #     },
     # ]
+    #
+    # RAG_PROMPT_TEMPLATE = tokenizer.apply_chat_template(
+    #     prompt_chat, tokenize=False, add_generation_prompt=True,
+    # )
 
-    prompt_chat = [
+    prompt_chat1 = [
         {
             "role": "system",
             "content": """Your are an helpful AI assistant, Using the information contained in the context,
-            greet the user and Give a comprehensive answer to the Question.
-            Respond only to the Question asked, response should be concise and relevant to the question.""",
+                greet the user and Give a comprehensive answer to the Question.
+                Respond only to the Question asked, response should be concise and relevant to the question.""",
         },
         {
             "role": "user",
             "content": """Context:
-        {context}
-        ---
-        Now here is the Question you need to answer.
-        Question:{question}
+            {context}
+            ---
+            Now here is the Question you need to answer.
+            Question:{question}
+                    """,
+        },
+    ]
+    prompt_chat2 = [
+        {
+            "role": "system",
+            "content": """You are helpful AI assistant, 
+                assistant is unable to answer the question given by user. inform the user that you cannot answer the question politely and inform the user to ask questions regarding only the transport services only.""",
+
+        },
+        {
+            "role": "user",
+            "content": """
+                Now here is the Question.
+                Question:{question}
                 """,
         },
     ]
 
-    # prompt_chat = [
-    #     {
-    #         "role": "system",
-    #         "content": """Using the information contained in the context,
-    # Give a comprehensive answer to the question.
-    # Respond only to the question asked , response should be concise and relevant to the question.
-    # provide the number of the source document when relevant.
-    # If the answer cannot be deduced from the context, do not give an answer""",
-    #
-    #     },
-    #     {
-    #         "role": "user",
-    #         "content": """Context:
-    # {context}
-    # ---
-    # Now here is the Question you need to answer.
-    # Question:{question}
-    #         """,
-    #     },
-    # ]
-
-    RAG_PROMPT_TEMPLATE = tokenizer.apply_chat_template(
-        prompt_chat, tokenize=False, add_generation_prompt=True,
+    RAG_PROMPT_TEMPLATE1 = tokenizer.apply_chat_template(
+        prompt_chat1, tokenize=False, add_generation_prompt=True,
+    )
+    RAG_PROMPT_TEMPLATE2 = tokenizer.apply_chat_template(
+        prompt_chat2, tokenize=False, add_generation_prompt=True,
     )
 
     print("Microsoft Phi-3 model initialized")
@@ -178,48 +178,51 @@ def init():
 def Retrival_Augmentation(query):
     global KNOWLEDGE_VECTOR_DATABASE
 
+    # user_query = query
+    # retrieved_docs = KNOWLEDGE_VECTOR_DATABASE.similarity_search(query=user_query, k=1)
+    #
+    # print("======================================\n")
+    # print(retrieved_docs[0].page_content)
+    # print("======================================\n")
+    #
+    # return retrieved_docs[0].page_content
+
     user_query = query
-    retrieved_docs = KNOWLEDGE_VECTOR_DATABASE.similarity_search(query=user_query, k=1)
+    args = {'score_threshold': 0.70}
 
-    #
-    # args = {'score_threshold': 0.70}
-    #
-    # retrieved_docs = KNOWLEDGE_VECTOR_DATABASE.similarity_search_with_relevance_scores(user_query, k=3, **args)
+    retrieved_docs = KNOWLEDGE_VECTOR_DATABASE.similarity_search_with_relevance_scores(user_query, k=3, **args)
+    if len(retrieved_docs) == 0:
+        print("no docs retrived")
+        return ""
 
     print("======================================\n")
-    print(retrieved_docs[0].page_content)
+    print(retrieved_docs[0][0])
     print("======================================\n")
 
-    # if len(retrieved_docs) == 0:
-    #     print("hello")
-    #     return "error"
-
-
-
-    return retrieved_docs[0].page_content
+    return retrieved_docs[0][0].page_content
 
 
 def generate_answer(context, question):
-    global RAG_PROMPT_TEMPLATE, pipe, generation_args
+    global RAG_PROMPT_TEMPLATE, pipe, generation_args, RAG_PROMPT_TEMPLATE1, RAG_PROMPT_TEMPLATE2
 
-    final_prompt = RAG_PROMPT_TEMPLATE.format(
-        question="greet me by saying hello and answer the question." + question, context=context
-    )
+    # final_prompt = RAG_PROMPT_TEMPLATE.format(
+    #     question="greet me by saying hello and answer the question." + question, context=context
+    # )
+    #
+    # output = pipe(final_prompt, **generation_args)
+    # return output[0]['generated_text']
+
+    if (context == ""):
+        final_prompt = RAG_PROMPT_TEMPLATE2.format(
+            question="greet me by saying hello and answer the question." + question
+        )
+    else:
+        final_prompt = RAG_PROMPT_TEMPLATE1.format(
+            question="greet me by saying hello and answer the question." + question, context=context
+        )
 
     output = pipe(final_prompt, **generation_args)
     return output[0]['generated_text']
-
-
-# @app.post("/start_session")
-# async def start_session():
-#     session_id = str(uuid.uuid4())
-#     # Create a new session document
-#     chats_collection.insert_one({
-#         "session_id": session_id,
-#         "messages": [],
-#         "created_at": datetime.datetime.now()
-#     })
-#     return {"session_id": session_id}
 
 
 def delete_empty_sessions():
@@ -233,31 +236,16 @@ def delete_empty_sessions():
 
 @app.post("/start_session")
 async def start_session():
-    # Delete empty sessions before starting a new session
     deleted_count = delete_empty_sessions()
     print(f"Deleted {deleted_count} empty sessions before starting a new session")
 
     session_id = str(uuid.uuid4())
-    # Create a new session document
     chats_collection.insert_one({
         "session_id": session_id,
         "messages": [],
         "created_at": datetime.datetime.now()
     })
     return {"session_id": session_id}
-
-
-# @app.post("/query")
-# async def receive_query(request: Request):
-#     data = await request.json()
-#     query = data.get("query")
-#     print(f"Received query: {query}")
-#     context = Retrival_Augmentation(query)
-#     if context == "error":
-#         return {"response": "No answer found"}
-#     ans = generate_answer(context, query)
-#     print(ans)
-#     return {"response": ans}
 
 
 @app.post("/query")
@@ -275,7 +263,6 @@ async def receive_query(request: Request):
     answer = generate_answer(context, query)
     print(answer)
 
-    # Store the chat in the session document in MongoDB
     chat = {
         "user": query,
         "context": context,
@@ -291,22 +278,10 @@ async def receive_query(request: Request):
     return {"response": answer}
 
 
-# @app.get("/chats")
-# async def get_chats():
-#     sessions = chats_collection.find()
-#     all_chats = {}
-#     for session in sessions:
-#         session_id = session['session_id']
-#         all_chats[session_id] = session['messages']
-#
-#     print("got")
-#     return all_chats
-
 @app.get("/chats")
 async def get_chats():
     try:
         chats = list(chats_collection.find())
-        # Convert ObjectId to string for JSON serialization
         for chat in chats:
             chat["_id"] = str(chat["_id"])
         return chats
