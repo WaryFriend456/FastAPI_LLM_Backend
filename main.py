@@ -196,10 +196,16 @@ def Retrival_Augmentation(query):
         return ""
 
     print("======================================\n")
-    print(retrieved_docs[0][0])
+    print(retrieved_docs[:][:])
     print("======================================\n")
 
-    return retrieved_docs[0][0].page_content
+    result = ""
+
+    for i, j in retrieved_docs:
+
+        result += i.page_content + "\n"
+
+    return result
 
 
 def generate_answer(context, question):
@@ -284,7 +290,7 @@ async def get_chats():
         chats = list(chats_collection.find())
         for chat in chats:
             chat["_id"] = str(chat["_id"])
-        return chats
+        return chats[::-1]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch chats: {str(e)}")
 
