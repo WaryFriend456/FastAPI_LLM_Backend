@@ -30,6 +30,7 @@ generation_args = None
 mongo_client = None
 db = None
 chats_collection = None
+user_collection = None
 RAG_PROMPT_TEMPLATE1 = None
 RAG_PROMPT_TEMPLATE2 = None
 
@@ -59,11 +60,12 @@ app.add_middleware(
 
 
 def init():
-    global KNOWLEDGE_VECTOR_DATABASE, RAG_PROMPT_TEMPLATE, pipe, generation_args, mongo_client, db, chats_collection, RAG_PROMPT_TEMPLATE1, RAG_PROMPT_TEMPLATE2
+    global KNOWLEDGE_VECTOR_DATABASE, RAG_PROMPT_TEMPLATE, pipe, generation_args, mongo_client, db, chats_collection, RAG_PROMPT_TEMPLATE1, RAG_PROMPT_TEMPLATE2, user_collection
 
     mongo_client = MongoClient("mongodb://localhost:27017/")
     db = mongo_client["chat_db"]
     chats_collection = db["chat_sessions"]
+    user_collection = db["user_session"]
 
     embedding_model = HuggingFaceEmbeddings(
         model_name="thenlper/gte-small",
@@ -109,28 +111,6 @@ def init():
         "temperature": 0.0,
         "do_sample": False,
     }
-
-    # prompt_chat = [
-    #     {
-    #         "role": "system",
-    #         "content": """Your are an helpful AI assistant, Using the information contained in the context,
-    #         greet the user and Give a comprehensive answer to the Question.
-    #         Respond only to the Question asked, response should be concise and relevant to the question.""",
-    #     },
-    #     {
-    #         "role": "user",
-    #         "content": """Context:
-    #     {context}
-    #     ---
-    #     Now here is the Question you need to answer.
-    #     Question:{question}
-    #             """,
-    #     },
-    # ]
-    #
-    # RAG_PROMPT_TEMPLATE = tokenizer.apply_chat_template(
-    #     prompt_chat, tokenize=False, add_generation_prompt=True,
-    # )
 
     prompt_chat1 = [
         {
@@ -241,17 +221,77 @@ def delete_empty_sessions():
 
 
 @app.post("/start_session")
-async def start_session():
+async def start_session(request: Request):
+    # deleted_count = delete_empty_sessions()
+    # print(f"Deleted {deleted_count} empty sessions before starting a new session")
+    #
+    # session_id = str(uuid.uuid4())
+    # chats_collection.insert_one({
+    #     "session_id": session_id,
+    #     "messages": [],
+    #     "created_at": datetime.datetime.now()
+    # })
+    # return {"session_id": session_id}
+
+    data = await request.json()
+    UID = data.get("UID")
+
     deleted_count = delete_empty_sessions()
     print(f"Deleted {deleted_count} empty sessions before starting a new session")
 
+
     session_id = str(uuid.uuid4())
+    # Create a new session document
     chats_collection.insert_one({
+        "UID": UID,
         "session_id": session_id,
         "messages": [],
         "created_at": datetime.datetime.now()
     })
     return {"session_id": session_id}
+
+
+@app.post("/registration")
+async def register_user(request: Request):
+    data = await request.json()
+    name = data.get("name")
+    email = data.get("email")
+    password = data.get("password")
+
+    if not name or not email or not password:
+        raise HTTPException(status_code=400, detail="Name, email, and password are required")
+
+    UID = str(uuid.uuid4())
+
+    user = {
+        "UID": UID,
+        "name": name,
+        "email": email,
+        "password": password,
+        "created_at": datetime.datetime.now()
+    }
+    user_collection.insert_one(user)
+    return {"message": "User registered successfully"}
+    # users_collection = db["users"]
+    # users_collection.insert_one(user)
+    # return {"message": "User registered successfully"}
+
+
+@app.post("/login")
+async def login_user(request: Request):
+    data = await request.json()
+    username = data.get("name")
+    password = data.get("password")
+    print(username)
+
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="Email and password are required")
+
+    user = user_collection.find_one({"name": username, "password": password})
+    if user:
+        return {"message": "Login successful", "UID": user["UID"]}
+    else:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
 
 @app.post("/query")
@@ -284,15 +324,26 @@ async def receive_query(request: Request):
     return {"response": answer}
 
 
-@app.get("/chats")
-async def get_chats():
+@app.post("/chats")
+async def get_chats(request: Request):
+    # try:
+    #     chats = list(chats_collection.find())
+    #     for chat in chats:
+    #         chat["_id"] = str(chat["_id"])
+    #     return chats[::-1]
+    # except Exception as e:
+    #     raise HTTPException(status_code=500, detail=f"Failed to fetch chats: {str(e)}")
     try:
-        chats = list(chats_collection.find())
+        data = await request.json()
+        UID = data.get("UID")
+        chats = list(chats_collection.find({"UID": UID}))
+        # Convert ObjectId to string for JSON serialization
         for chat in chats:
             chat["_id"] = str(chat["_id"])
         return chats[::-1]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch chats: {str(e)}")
+
 
 
 @app.get("/query")
