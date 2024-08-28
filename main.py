@@ -92,12 +92,12 @@ def init():
     print("Models and vector database initialized")
 
     model = AutoModelForCausalLM.from_pretrained(
-        "microsoft/Phi-3-mini-128k-instruct",
+        "microsoft/Phi-3.5-mini-instruct",      # microsoft/Phi-3-mini-128k-instruct
         device_map="cuda",
         torch_dtype="auto",
         trust_remote_code=True,
     )
-    tokenizer = AutoTokenizer.from_pretrained("microsoft/Phi-3-mini-128k-instruct")
+    tokenizer = AutoTokenizer.from_pretrained("microsoft/Phi-3.5-mini-instruct")
 
     pipe = pipeline(
         "text-generation",
@@ -133,7 +133,7 @@ def init():
         {
             "role": "system",
             "content": """You are helpful AI assistant, 
-                assistant is unable to answer the question given by user. inform the user that you cannot answer the question politely and inform the user to ask questions regarding only the transport services only.""",
+                assistant is unable to answer the question given by user. inform the user that you cannot answer the question politely and inform the user to ask questions regarding the transport services only.""",
 
         },
         {
@@ -208,6 +208,11 @@ def generate_answer(context, question):
         )
 
     output = pipe(final_prompt, **generation_args)
+
+    # Free up GPU memory
+    torch.cuda.empty_cache()
+    torch.cuda.synchronize()
+
     return output[0]['generated_text']
 
 
@@ -295,7 +300,7 @@ async def login_user(request: Request):
 
 
 @app.post("/query")
-async def receive_query(request: Request):
+async def receive_query(request: Request):# here query is receieved.
     data = await request.json()
     query = data.get("query")
     session_id = data.get("session_id")
@@ -305,8 +310,8 @@ async def receive_query(request: Request):
         raise HTTPException(status_code=400, detail="session_id is required")
 
     print(f"Received query: {query}")
-    context = Retrival_Augmentation(query)
-    answer = generate_answer(context, query)
+    context = Retrival_Augmentation(query)#RAG
+    answer = generate_answer(context, query)# model generates answer.
     print(answer)
 
     chat = {
@@ -314,7 +319,7 @@ async def receive_query(request: Request):
         "context": context,
         "chatbot": answer,
         "timestamp": datetime.datetime.now()
-    }
+    }# gets saved in mongoDB.
 
     chats_collection.update_one(
         {"session_id": session_id},
